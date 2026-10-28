@@ -1,7 +1,7 @@
 // Minhas tarefas: blocos do dia, atrasados, semana e fechamento do mês.
 import { html, montar } from "../core/dom.js";
 import { icone } from "../core/icones.js";
-import { sessao, nomeUnidade, nomeModulo, pode, minhasUnidades } from "../core/sessao.js";
+import { sessao, nomeUnidade, nomeModulo, pode, unidadesFiltro } from "../core/sessao.js";
 import { estadoVazio, estadoErro, seloStatusPendencia, seloPrioridade } from "../core/ui.js";
 import { hoje, formatarData, nomeDiaSemana } from "../core/tempo.js";
 import { minhasTarefas, ROTULOS_SITUACAO } from "../services/rotinas.js";
@@ -22,7 +22,7 @@ export function cartaoTarefa(t, voltar = "#/tarefas") {
     <div class="tarefa-hora">${hora}</div>
     <div style="min-width:0">
       <div class="tarefa-titulo quebra">${t.bloco.nome}</div>
-      <div class="tarefa-sub">${nomeModulo(t.modelo.setorId)} · ${t.modelo.nome}${minhasUnidades().length > 1 ? ` · ${nomeUnidade(t.modelo.unidadeId)}` : ""} · ${t.itens} atividade(s)${t.data !== hoje() && freq === "diaria" ? ` · ${formatarData(t.data)}` : ""}</div>
+      <div class="tarefa-sub">${nomeModulo(t.modelo.setorId)} · ${t.modelo.nome}${unidadesFiltro().length > 1 ? ` · ${nomeUnidade(t.modelo.unidadeId)}` : ""} · ${t.itens} atividade(s)${t.data !== hoje() && freq === "diaria" ? ` · ${formatarData(t.data)}` : ""}</div>
     </div>
     <span class="selo ${s.classe}">${s.rotulo}</span>
   </a>`;
@@ -30,15 +30,17 @@ export function cartaoTarefa(t, voltar = "#/tarefas") {
 
 export default async function telaTarefas(el) {
   let tarefas;
+  let livres = [];
   let minhasPendencias = [];
   try {
     const [t, p] = await Promise.all([
-      minhasTarefas(),
+      minhasTarefas({ incluirLivres: true }),
       pode("pendencias", 1)
-        ? pend.listar({ unidades: minhasUnidades().map((u) => u.id), somenteAbertas: true }).catch(() => [])
+        ? pend.listar({ unidades: unidadesFiltro().map((u) => u.id), somenteAbertas: true }).catch(() => [])
         : Promise.resolve([]),
     ]);
-    tarefas = t;
+    tarefas = t.filter((x) => x.atribuicao === "minha");
+    livres = t.filter((x) => x.atribuicao === "livre");
     minhasPendencias = p.filter((x) => pend.souResponsavel(x));
   } catch (e) {
     montar(el, estadoErro(e));
@@ -53,14 +55,24 @@ export default async function telaTarefas(el) {
     { titulo: "Fechamento do mês", itens: tarefas.filter((t) => t.modelo.frequencia === "mensal" && !["atrasado", "correcao"].includes(t.situacao)) },
   ].filter((g) => g.itens.length);
 
-  const pendentesHoje = tarefas.filter((t) => t.situacao !== "enviado").length;
+  const paraEnviar = tarefas.filter((t) => ["agora", "atrasado", "correcao"].includes(t.situacao)).length;
+  const atrasados = tarefas.filter((t) => ["atrasado", "correcao"].includes(t.situacao)).length;
+  const aindaVaoAbrir = tarefas.filter((t) => t.situacao === "futuro").length;
   const primeiroNome = sessao.perfil?.nome?.split(" ")[0] || "";
+  const dataTexto = `${nomeDiaSemana(d)}, ${formatarData(d)}`;
+  const unidadesTexto = unidadesFiltro().length > 1 ? "" : ` · ${unidadesFiltro()[0]?.nome || ""}`;
+  const resumo = paraEnviar
+    ? `Você tem ${paraEnviar} bloco(s) para enviar${atrasados ? ` (${atrasados} atrasado(s))` : ""}${aindaVaoAbrir ? ` e ${aindaVaoAbrir} ainda vão abrir hoje` : ""}. ${dataTexto}${unidadesTexto}.`
+    : aindaVaoAbrir
+      ? `Nada para enviar agora; ${aindaVaoAbrir} bloco(s) ainda vão abrir hoje. ${dataTexto}${unidadesTexto}.`
+      : `Tudo enviado por enquanto. ${dataTexto}${unidadesTexto}.`;
+  const livresAbertos = livres.filter((t) => t.situacao !== "enviado");
 
   montar(
     el,
     html`${cabecalho(
       `Olá, ${primeiroNome}`,
-      pendentesHoje ? `Você tem ${pendentesHoje} bloco(s) para enviar. ${nomeDiaSemana(d)}, ${formatarData(d)}.` : `Tudo enviado por enquanto. ${nomeDiaSemana(d)}, ${formatarData(d)}.`,
+      resumo,
       pode("pendencias", 1) ? html`<a class="btn btn-secundario" href="#/ocorrencias?nova=1">${icone("alerta")} Registrar ocorrência</a>` : ""
     )}
     ${grupos.length
@@ -75,6 +87,13 @@ export default async function telaTarefas(el) {
           titulo: "Nenhuma rotina para você agora",
           texto: "Quando houver blocos programados para você, eles aparecem aqui no horário certo.",
         })}
+    ${livresAbertos.length
+      ? html`<details class="painel painel-compacto" style="margin-bottom:28px">
+          <summary style="cursor:pointer;font-weight:600">Blocos da equipe sem responsável definido (${livresAbertos.length})</summary>
+          <p class="pequeno texto-3" style="margin:10px 0 12px">Você supervisiona estes setores e pode preencher se precisar, mas eles não contam como tarefas suas. Para direcionar cada bloco a alguém, defina os responsáveis em <strong>Setor › Rotinas › Editar</strong>.</p>
+          <div class="pilha-sm">${livresAbertos.map((t) => cartaoTarefa(t))}</div>
+        </details>`
+      : ""}
     ${minhasPendencias.length
       ? html`<section style="margin-top:12px">
           <h2 style="font-size:var(--t-md);margin-bottom:12px;color:var(--texto-2)">Pendências sob sua responsabilidade</h2>

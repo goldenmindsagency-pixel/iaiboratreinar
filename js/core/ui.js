@@ -74,7 +74,10 @@ export function abrirModal({ titulo, corpo, rodape, largo = false, aoMontar, fec
     resolver(valor);
   }
   function tecla(ev) {
-    if (ev.key === "Escape") fechar(undefined);
+    // Com janelas sobrepostas, o Esc fecha só a que está por cima.
+    if (ev.key !== "Escape") return;
+    const abertas = document.querySelectorAll(".sobreposicao");
+    if (abertas[abertas.length - 1] === fundo) fechar(undefined);
   }
   document.addEventListener("keydown", tecla);
   on(fundo, "click", "[data-fechar]", () => fechar(undefined));

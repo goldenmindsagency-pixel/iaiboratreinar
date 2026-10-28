@@ -230,7 +230,7 @@ export default async function telaColaboradores(el, ctx) {
               ${admin
                 ? html`<td class="direita" data-rotulo=""><div class="linha" style="gap:2px;justify-content:flex-end;flex-wrap:nowrap">
                     <button class="btn btn-fantasma btn-sm" data-editar="${p.login}" title="Editar">${icone("editar")}</button>
-                    <button class="btn btn-fantasma btn-sm" data-senha="${p.login}" title="Redefinir senha">${icone("chave")}</button>
+                    ${p.login !== sessao.perfil.login ? html`<button class="btn btn-fantasma btn-sm" data-senha="${p.login}" title="Redefinir senha">${icone("chave")}</button>` : ""}
                     ${p.login !== sessao.perfil.login ? html`<button class="btn btn-fantasma btn-sm" data-ativo="${p.login}" title="${p.ativo === false ? "Reativar" : "Desativar"}">${icone(p.ativo === false ? "desfazer" : "bloquear")}</button>` : ""}
                   </div></td>`
                 : ""}

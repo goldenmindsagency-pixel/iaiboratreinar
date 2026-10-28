@@ -49,6 +49,9 @@ const MAPA_CODIGOS = {
 
 export function normalizarErro(e) {
   if (e instanceof ErroSistema) return e;
+  // Mensagens de validação escritas pelo próprio sistema (new Error("...")) são mostradas como estão.
+  // Erros internos do navegador (TypeError etc.) e do Firebase continuam com a mensagem padrão.
+  if (e && e.constructor === Error && !e.code && typeof e.message === "string" && e.message) return new ErroSistema("validacao", e.message, e);
   const codigo = MAPA_CODIGOS[e?.code] || (e?.message?.includes("offline") ? "sem-conexao" : "desconhecido");
   const erro = new ErroSistema(codigo, undefined, e);
   if (codigo === "desconhecido" && e) console.error("[IAÍ Gestão]", e);

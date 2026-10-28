@@ -6,7 +6,7 @@ import { hoje } from "../core/tempo.js";
 const it = (texto, extra = {}) => ({ id: novoIdCurto(), texto, obrigatoria: true, exigeFoto: false, contexto: "", ativo: true, ...extra });
 
 function bloco(nome, { inicio = "00:00", fim = "23:59", dias = [], dia = null, itens = [], somenteEscalado = false } = {}) {
-  return { id: novoIdCurto(), nome, inicio, fim, dias, dia, responsaveis: [], somenteEscalado, ativo: true, desde: hoje(), itens };
+  return { id: novoIdCurto(), nome, inicio, fim, dias, dia, responsaveis: [], somenteEscalado, ativo: true, desde: hoje(), desdeEm: new Date().toISOString(), itens };
 }
 
 export function gerarModelosIniciais(unidadeId) {

@@ -1,9 +1,9 @@
 // Motor de rotinas: modelos (checklists), agenda de blocos, execuções, registros avulsos e escalas.
-import { sessao, pode, naUnidade, meuLogin, minhasUnidades, todosModulos } from "../core/sessao.js";
+import { sessao, pode, nivel, naUnidade, meuLogin, unidadesFiltro, todosModulos, ehAdmin } from "../core/sessao.js";
 import { ErroSistema } from "../core/erros.js";
 import { CONJUNTOS_RESPOSTA } from "../core/constantes.js";
 import {
-  hoje, somarDias, diaSemana, periodoDe, limiteEnvio, instante, mesDe, mesesEntre, diasEntre, segundaDaSemana, minutosDe,
+  hoje, somarDias, diaSemana, periodoDe, limiteEnvio, instante, mesDe, mesesEntre, diasEntre, segundaDaSemana, minutosDe, dataISO,
 } from "../core/tempo.js";
 import { bd, auditar, carimboCriacao, carimboAtualizacao, exigir, unirConsultas } from "./base.js";
 
@@ -45,6 +45,7 @@ export function blocoVazio(frequencia, ordem = 0) {
     somenteEscalado: false,
     ativo: true,
     desde: hoje(),
+    desdeEm: new Date().toISOString(),
     itens: [],
   };
 }
@@ -96,6 +97,7 @@ function limparModelo(m) {
       somenteEscalado: Boolean(b.somenteEscalado),
       ativo: b.ativo !== false,
       desde: b.desde || hoje(),
+      desdeEm: b.desdeEm || null,
       ate: b.ativo === false ? b.ate || hoje() : null,
       itens: (b.itens || []).map((i) => ({
         id: i.id || novoIdCurto(),
@@ -173,6 +175,7 @@ export async function duplicarModelo(modelo, unidadeId) {
     b.id = novoIdCurto();
     b.responsaveis = [];
     b.desde = hoje();
+    b.desdeEm = new Date().toISOString();
     b.itens.forEach((i) => (i.id = novoIdCurto()));
   });
   return salvarModelo(null, copia);
@@ -189,6 +192,34 @@ function blocoValidoEm(bloco, data, modelo) {
   if (bloco.desde && data < bloco.desde) return false;
   if (bloco.ativo === false && (!bloco.ate || data >= bloco.ate)) return false;
   return true;
+}
+
+/**
+ * Momento a partir do qual o bloco passa a ser cobrado. Evita que blocos de horários
+ * anteriores à criação da rotina (ou à inclusão/reativação do bloco) apareçam como atrasados.
+ */
+function inicioVigencia(modelo, bloco) {
+  if (bloco.desdeEm) {
+    const d = new Date(bloco.desdeEm);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  // Rotinas criadas antes deste controle: usa o momento da criação, se o bloco nasceu junto com a rotina.
+  const criado = modelo.criadoEm instanceof Date && !Number.isNaN(modelo.criadoEm.getTime()) ? modelo.criadoEm : null;
+  if (criado && bloco.desde && bloco.desde === dataISO(criado) && (!modelo.desde || modelo.desde === bloco.desde)) return criado;
+  return null;
+}
+
+/** true se a ocorrência é anterior à vigência do bloco (não deve ser cobrada) */
+function antesDaVigencia(modelo, bloco, periodo, data) {
+  const vig = inicioVigencia(modelo, bloco);
+  if (!vig) return false;
+  // Fechamento mensal: vale enquanto a janela de envio ainda estiver aberta.
+  if (modelo.frequencia === "mensal") return limiteEnvio("mensal", periodo) <= vig;
+  // Diária: conta se o bloco ainda estava aberto quando passou a valer
+  // (ex.: rotina criada às 9h vale para o bloco das 8h às 21h do mesmo dia, mas não para o das 5h30 às 9h).
+  if (modelo.frequencia === "diaria") return instante(data, bloco.fim || "23:59") <= vig;
+  // Semanal: o dia do bloco precisa começar depois que a rotina passou a valer (começa no próximo dia previsto).
+  return instante(data) < vig;
 }
 
 /** Data em que o bloco é previsto dentro do período */
@@ -218,7 +249,7 @@ export function ocorrenciasProgramadas(modelos, inicio, fim, escalas = new Map()
       for (const data of diasEntre(inicio, fim)) {
         const ds = diaSemana(data);
         for (const b of m.blocos || []) {
-          if (!(b.dias || []).includes(ds) || !blocoValidoEm(b, data, m)) continue;
+          if (!(b.dias || []).includes(ds) || !blocoValidoEm(b, data, m) || antesDaVigencia(m, b, data, data)) continue;
           const resp = responsaveisDoBloco(m, b, data, escalas);
           if (resp === null) continue;
           saida.push(ocorrencia(m, b, data, data, resp));
@@ -229,7 +260,7 @@ export function ocorrenciasProgramadas(modelos, inicio, fim, escalas = new Map()
       for (const seg of semanas) {
         for (const b of m.blocos || []) {
           const data = dataPrevista(m, b, seg);
-          if (data < inicio || data > fim || !blocoValidoEm(b, data, m)) continue;
+          if (data < inicio || data > fim || !blocoValidoEm(b, data, m) || antesDaVigencia(m, b, seg, data)) continue;
           const resp = responsaveisDoBloco(m, b, data, escalas);
           if (resp === null) continue;
           saida.push(ocorrencia(m, b, seg, data, resp));
@@ -240,7 +271,7 @@ export function ocorrenciasProgramadas(modelos, inicio, fim, escalas = new Map()
         const periodo = `${mes}-25`;
         for (const b of m.blocos || []) {
           const data = dataPrevista(m, b, periodo);
-          if (data < inicio || data > fim || !blocoValidoEm(b, data, m)) continue;
+          if (data < inicio || data > fim || !blocoValidoEm(b, data, m) || antesDaVigencia(m, b, periodo, data)) continue;
           saida.push(ocorrencia(m, b, periodo, data, b.responsaveis || []));
         }
       }
@@ -306,9 +337,38 @@ export function podeEnviarAgora(oc, agora = new Date()) {
   return s === "futuro" && oc.modelo.frequencia !== "mensal" && oc.data === hoje();
 }
 
-/** Um bloco é "meu" se não tem responsável definido ou se estou na lista */
+/** Um bloco pode ser preenchido por mim se não tem responsável definido ou se estou na lista */
 export function souResponsavel(oc, login = meuLogin()) {
   return !oc.responsaveis?.length || oc.responsaveis.includes(login);
+}
+
+/**
+ * Setor operacional "principal" de quem supervisiona um único setor (ex.: coordenação do salão):
+ * o único setor de rotina em que a pessoa tem nível de edição.
+ */
+function setorPrincipal() {
+  if (ehAdmin()) return null;
+  const setores = todosModulos().filter((m) => m.tipo === "rotina" && m.id !== "gestao").map((m) => m.id);
+  const editaveis = setores.filter((s) => nivel(s) >= 3);
+  return editaveis.length === 1 ? editaveis[0] : null;
+}
+
+/**
+ * De quem é o bloco nas "Minhas tarefas":
+ *  - "minha": a pessoa está entre os responsáveis; ou o bloco não tem responsável e ela é da
+ *    equipe que executa (nível "próprio" no setor), ou é a rotina do gestor e ela é gestora,
+ *    ou é o setor que ela coordena;
+ *  - "livre": sem responsável definido e a pessoa apenas supervisiona o setor (pode preencher,
+ *    mas não é cobrada por isso);
+ *  - null: o bloco é de outra pessoa.
+ */
+export function atribuicao(oc, login = meuLogin()) {
+  if (oc.responsaveis?.length) return oc.responsaveis.includes(login) ? "minha" : null;
+  const setor = oc.modelo.setorId;
+  if (nivel(setor) === 1) return "minha";
+  if (setor === "gestao") return pode("gestao", 3) ? "minha" : null;
+  if (setorPrincipal() === setor) return "minha";
+  return "livre";
 }
 
 // ======================= Escalas =======================
@@ -593,12 +653,13 @@ export async function cancelarRegistro(registro) {
 // ======================= Minhas tarefas =======================
 
 /**
- * Blocos de hoje (e atrasados ainda dentro do prazo) para o usuário atual,
- * em todos os setores de rotina em que ele tem acesso.
+ * Blocos de hoje (e atrasados ainda dentro do prazo) para o usuário atual, nas unidades
+ * escolhidas no seletor do topo e em todos os setores de rotina em que ele tem acesso.
+ * incluirLivres: inclui também os blocos sem responsável dos setores que a pessoa só supervisiona.
  */
-export async function minhasTarefas({ setores } = {}) {
+export async function minhasTarefas({ setores, incluirLivres = false } = {}) {
   const data = hoje();
-  const unidades = minhasUnidades().map((u) => u.id);
+  const unidades = unidadesFiltro().map((u) => u.id);
   const listaSetores = (setores || todosModulos().filter((m) => m.tipo === "rotina").map((m) => m.id)).filter((s) => pode(s, 1));
   if (!unidades.length || !listaSetores.length) return [];
   const modelos = await modelosVisiveis({ unidades, setores: listaSetores });
@@ -616,10 +677,12 @@ export async function minhasTarefas({ setores } = {}) {
   ocs = ocs.concat(ocorrenciasProgramadas(mensais, `${mesRef}-01`, somarDias(`${mesRef}-25`, 12), escalas).filter((o) => o.periodo === periodoMensal));
 
   const agora = new Date();
-  ocs = ocs.filter((o) => souResponsavel(o));
+  ocs = ocs
+    .map((o) => ({ ...o, atribuicao: atribuicao(o) }))
+    .filter((o) => o.atribuicao === "minha" || (incluirLivres && o.atribuicao === "livre"));
   const relevantes = ocs.filter((o) => {
     if (o.modelo.frequencia === "diaria") return o.data === data || (o.data < data && situacaoOcorrencia(o, null, agora) === "atrasado");
-    if (o.modelo.frequencia === "semanal") return o.periodo === segundaDaSemana(data) && o.data <= data || (o.data < data && situacaoOcorrencia(o, null, agora) === "atrasado");
+    if (o.modelo.frequencia === "semanal") return (o.periodo === segundaDaSemana(data) && o.data <= data) || (o.data < data && situacaoOcorrencia(o, null, agora) === "atrasado");
     return true;
   });
   const execs = await execucoesPorId(relevantes.map((o) => o.id));
@@ -628,7 +691,7 @@ export async function minhasTarefas({ setores } = {}) {
       const ex = execs.get(o.id) || null;
       return { ...o, execucao: ex, situacao: situacaoOcorrencia(o, ex, agora) };
     })
-    .filter((o) => !(o.modelo.frequencia !== "diaria" && o.situacao === "futuro" && o.modelo.frequencia === "mensal"))
+    .filter((o) => !(o.modelo.frequencia === "mensal" && o.situacao === "futuro"))
     .sort((a, b) => (a.data + (a.bloco.inicio || "")).localeCompare(b.data + (b.bloco.inicio || "")));
 }
 

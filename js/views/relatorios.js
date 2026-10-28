@@ -84,7 +84,7 @@ async function abaPeriodo(alvo, ctx) {
 }
 
 async function abaMensais(alvo, ctx) {
-  const unidades = minhasUnidades();
+  const unidades = unidadesFiltro();
   const lista = await listarRelatorios(unidades.map((u) => u.id)).catch(() => []);
   const sel = ctx.busca.rel ? lista.find((r) => r.id === ctx.busca.rel) : null;
   if (sel) {

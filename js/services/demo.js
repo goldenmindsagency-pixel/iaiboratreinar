@@ -97,7 +97,10 @@ export async function criarDemonstracao() {
   for (const u of unidades) {
     for (const m of gerarModelosIniciais(u.id)) {
       const id = banco.novoId();
-      m.blocos.forEach((b) => (b.desde = inicioHistorico));
+      m.blocos.forEach((b) => {
+        b.desde = inicioHistorico;
+        b.desdeEm = null; // histórico de exemplo: vale desde o primeiro dia
+      });
       const responsavel =
         m.setorId === "limpeza" ? `zeladora.${u.id}` : m.setorId === "recepcao" ? `recepcao.${u.id}` : m.setorId === "gestao" ? `gestor.${u.id}` : "";
       if (responsavel) m.blocos.forEach((b) => (b.responsaveis = b.somenteEscalado ? [] : [responsavel]));

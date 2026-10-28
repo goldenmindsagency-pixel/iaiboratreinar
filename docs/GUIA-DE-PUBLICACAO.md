@@ -114,6 +114,14 @@ Clique em **Commit changes**. Em 1 a 2 minutos o site deixa o modo demonstraçã
 - **Cópia de segurança**: **Configurações › Cópia de segurança**, uma vez por semana.
 - **Instalar no celular**: abra o site no navegador do celular e use "Adicionar à tela inicial".
 
+## Atualizar para uma nova versão
+
+1. No repositório do GitHub, envie os arquivos novos por cima dos antigos (**Add file › Upload files**, arrastando o conteúdo do ZIP) e clique em **Commit changes**. O seu `js/config.js` já vem preenchido no ZIP; se for subir arquivo por arquivo, não troque o seu `config.js`.
+2. Se o arquivo `firebase/firestore.rules` mudou, copie o conteúdo inteiro para **Firestore › Regras** e clique em **Publicar**.
+3. Aguarde 1 a 2 minutos e recarregue o site segurando Shift (ou Ctrl + Shift + R).
+
+Os dados já cadastrados (unidades, rotinas, colaboradores, registros) não são alterados por uma atualização.
+
 ## Se algo der errado
 
 | Sintoma | O que fazer |

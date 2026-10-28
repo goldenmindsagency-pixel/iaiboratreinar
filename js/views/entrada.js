@@ -6,6 +6,16 @@ import { avisar, avisarErro, comCarregamento } from "../core/ui.js";
 import { mensagemDe } from "../core/erros.js";
 import { entrar, trocarMinhaSenha, normalizarLogin } from "../services/usuarios.js";
 
+/**
+ * Cada tela de entrada usa um elemento novo dentro da raiz: os eventos da tela anterior
+ * são descartados junto com ele e não interferem nas telas seguintes (nem no painel).
+ */
+function novaTela(raiz) {
+  const tela = document.createElement("div");
+  raiz.replaceChildren(tela);
+  return tela;
+}
+
 function moldura(conteudo, { arte = true } = {}) {
   return html`<div class="tela-entrada">
     ${arte
@@ -47,7 +57,8 @@ function ativarMostrarSenha(el) {
 }
 
 // ======================= Login =======================
-export async function telaLogin(raiz, { publico } = {}) {
+export async function telaLogin(raizPagina, { publico } = {}) {
+  const raiz = novaTela(raizPagina);
   let demo = "";
   if (sessao.modoDemo) {
     const { USUARIOS_DEMO, SENHA_DEMO } = await import("../services/demo.js");
@@ -111,7 +122,8 @@ export async function telaLogin(raiz, { publico } = {}) {
 }
 
 // ======================= Configuração inicial =======================
-export function telaConfiguracaoInicial(raiz, { aoConcluir }) {
+export function telaConfiguracaoInicial(raizPagina, { aoConcluir }) {
+  const raiz = novaTela(raizPagina);
   const estado = {
     passo: 1,
     nomeEmpresa: "IAÍ Bora Treinar",
@@ -277,7 +289,8 @@ export function telaConfiguracaoInicial(raiz, { aoConcluir }) {
 }
 
 // ======================= Primeiro acesso =======================
-export function telaPrimeiroAcesso(raiz, { aoConcluir }) {
+export function telaPrimeiroAcesso(raizPagina, { aoConcluir }) {
+  const raiz = novaTela(raizPagina);
   montar(
     raiz,
     moldura(html`
@@ -318,7 +331,8 @@ export function telaPrimeiroAcesso(raiz, { aoConcluir }) {
 }
 
 // ======================= Acesso bloqueado =======================
-export function telaBloqueada(raiz, mensagem) {
+export function telaBloqueada(raizPagina, mensagem) {
+  const raiz = novaTela(raizPagina);
   montar(
     raiz,
     moldura(html`

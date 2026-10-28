@@ -3,7 +3,7 @@ import { html, raw, montar, $, $$, on, opcoes, lerFormulario } from "../core/dom
 import { icone } from "../core/icones.js";
 import { CONFIG } from "../config.js";
 import { sessao, ehAdmin, verAuditoria, todosModulos, nomeUnidade, minhasUnidades } from "../core/sessao.js";
-import { abrirModal, avisar, avisarErro, comCarregamento, confirmar, estadoVazio, carregandoPagina } from "../core/ui.js";
+import { abrirModal, avisar, avisarErro, comCarregamento, confirmar, estadoVazio, estadoErro, carregandoPagina } from "../core/ui.js";
 import { CATEGORIAS_PENDENCIA, PRIORIDADES, NIVEIS } from "../core/constantes.js";
 import { hoje, mesDe, somarMeses, nomeMes, formatarDataHora } from "../core/tempo.js";
 import { normalizarTexto, slug } from "../core/formato.js";
@@ -26,7 +26,9 @@ export default async function telaConfiguracoes(el, ctx) {
   try {
     await telas[aba](alvo, ctx);
   } catch (e) {
-    avisarErro(e);
+    console.error(e);
+    montar(alvo, estadoErro(e));
+    on(alvo, "click", "[data-acao=recarregar]", ctx.recarregar);
   }
 }
 

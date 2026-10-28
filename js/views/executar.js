@@ -15,6 +15,7 @@ import { campoFotos } from "./componentes/fotos.js";
 import { abrirExecucao } from "./componentes/execucao-detalhe.js";
 import { abrirNovaOcorrencia } from "./componentes/form-ocorrencia.js";
 import { linkVoltar } from "./comum.js";
+import { limparCacheAlertas } from "../services/alertas.js";
 
 const chaveRascunho = (id) => `iai-rascunho:${meuLogin()}:${id}`;
 
@@ -390,7 +391,12 @@ export default async function telaExecutar(el, ctx) {
         const r = emCorrecao
           ? await reenviarExecucao({ execucao, modelo, bloco, respostas: estado.respostas, extras: estado.extras, registros: ativos })
           : await enviarExecucao({ oc, respostas: estado.respostas, extras: estado.extras, registros: ativos });
-        localStorage.removeItem(chaveRascunho(id));
+        try {
+          localStorage.removeItem(chaveRascunho(id));
+        } catch {
+          /* sem armazenamento local */
+        }
+        limparCacheAlertas();
         avisar(r?.pendente ? "Sem internet: o envio ficou guardado no aparelho e será concluído quando a conexão voltar." : "Bloco enviado. Obrigado!", r?.pendente ? "info" : "ok", 6000);
         location.hash = voltar;
       } catch (e) {

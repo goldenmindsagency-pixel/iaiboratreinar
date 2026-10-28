@@ -50,9 +50,15 @@ export default async function telaUnidades(el, ctx) {
             const f = lerFormulario($("#form-un", mel));
             try {
               await salvarUnidade(u?.id || null, { ...f, ativo: u && pode("unidades", 4) ? f.ativo : u?.ativo !== false });
-              avisar("Unidade salva.");
               fechar(true);
-              ctx.recarregar();
+              if (!u || (u.ativo !== false) !== (f.ativo !== false) || u.nome !== f.nome) {
+                // Nova unidade, nome ou situação alterados: recarrega para atualizar o seletor do topo e os menus.
+                avisar("Unidade salva. Atualizando…");
+                setTimeout(() => location.reload(), 700);
+              } else {
+                avisar("Unidade salva.");
+                ctx.recarregar();
+              }
             } catch (e) {
               const c = $("#u-erro", mel);
               c.textContent = mensagemDe(e);

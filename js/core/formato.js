@@ -14,8 +14,13 @@ export function paraCentavos(texto) {
   if (typeof texto === "number") return Math.round(texto * 100);
   let s = String(texto ?? "").replace(/[R$\s]/g, "").trim();
   if (!s) return 0;
-  const temVirgula = s.includes(",");
-  if (temVirgula) s = s.replace(/\./g, "").replace(",", ".");
+  if (s.includes(",")) {
+    // padrão brasileiro: 1.234,56
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) {
+    // "1.500" ou "24.000" = milhar (e não 1,5 ou 24)
+    s = s.replace(/\./g, "");
+  }
   const n = Number(s);
   if (!Number.isFinite(n)) return NaN;
   return Math.round(n * 100);

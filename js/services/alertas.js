@@ -20,11 +20,13 @@ export async function carregarAlertas({ forcar = false } = {}) {
   const d = hoje();
   const alertas = [];
   const tarefas = [];
+  let tarefasPendentes = 0;
 
   // 1) Minhas rotinas
   tarefas.push(
     minhasTarefas()
       .then((lista) => {
+        tarefasPendentes = lista.filter((t) => ["agora", "atrasado", "correcao"].includes(t.situacao)).length;
         for (const t of lista) {
           if (t.situacao === "atrasado" || t.situacao === "correcao") {
             alertas.push({
@@ -152,6 +154,8 @@ export async function carregarAlertas({ forcar = false } = {}) {
   await Promise.all(tarefas);
   const ordem = { critico: 0, pendente: 1, info: 2 };
   alertas.sort((a, b) => ordem[a.tipo] - ordem[b.tipo]);
+  // Número exibido ao lado de "Minhas tarefas" no menu (blocos para enviar agora)
+  alertas.tarefasPendentes = tarefasPendentes;
   cache = { em: Date.now(), chave, lista: alertas };
   return alertas;
 }

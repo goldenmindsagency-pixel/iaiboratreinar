@@ -125,7 +125,7 @@ service cloud.firestore {
     match /uids/{uid} {
       allow get: if logado() && (request.auth.uid == uid || admin());
       allow list: if admin();
-      allow create: if (admin() && exists(/databases/$(database)/documents/usuarios/$(novo().login)))
+      allow create: if (admin() && existsAfter(/databases/$(database)/documents/usuarios/$(novo().login)))
                     || (emConfiguracaoInicial() && uid == request.auth.uid && novo().login == adminInicial());
       allow update: if false;
       allow delete: if admin();
@@ -343,7 +343,9 @@ service cloud.firestore {
 
     // ---------------- Comercial ----------------
     match /metas/{id} {
-      allow read: if pode('comercial', 1) && naUnidade(atual().unidadeId);
+      // get de um documento que ainda não existe (ex.: conferir antes de criar a meta) é permitido
+      allow get: if pode('comercial', 1) && (resource == null || naUnidade(atual().unidadeId));
+      allow list: if pode('comercial', 1) && naUnidade(atual().unidadeId);
       allow create, update: if pode('comercial', 3) && naUnidade(novo().unidadeId) && auditado();
       allow delete: if false;
     }
@@ -388,7 +390,10 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /relatoriosMensais/{id} {
-      allow read: if ativo() && naUnidade(atual().unidadeId)
+      // get de um relatório que ainda não foi iniciado devolve "não existe" em vez de erro
+      allow get: if ativo() && (pode('gestao', 2) || pode('relatorios', 2) || aprovador())
+                  && (resource == null || naUnidade(atual().unidadeId));
+      allow list: if ativo() && naUnidade(atual().unidadeId)
                   && (pode('gestao', 2) || pode('relatorios', 2) || aprovador());
       allow create: if pode('gestao', 3) && naUnidade(novo().unidadeId)
                     && novo().status in ['rascunho', 'enviado'] && auditado();

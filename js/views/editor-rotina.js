@@ -6,6 +6,7 @@ import { avisar, avisarErro, comCarregamento, confirmar, semPermissao, estadoErr
 import { FREQUENCIAS, CONJUNTOS_RESPOSTA, TIPOS_REGISTRO, DIAS_SEMANA, CONTEXTOS_GESTOR } from "../core/constantes.js";
 import { mensagemDe } from "../core/erros.js";
 import { obterModelo, salvarModelo, modeloVazio, blocoVazio, itemVazio } from "../services/rotinas.js";
+import { hoje } from "../core/tempo.js";
 import { pessoasPara } from "../services/usuarios.js";
 import { linkVoltar, unidadePadrao } from "./comum.js";
 
@@ -144,7 +145,7 @@ export default async function telaEditor(el, ctx) {
           ${modelo.frequencia !== "mensal" ? html`<div><button type="button" class="btn btn-secundario" data-add-bloco>${icone("mais")} Adicionar bloco</button></div>` : ""}
           <div class="aviso aviso-erro oculto" id="erro-editor" role="alert"></div>
           <div class="linha-entre painel painel-compacto" style="position:sticky;bottom:12px;z-index:5;box-shadow:var(--sombra)">
-            <span class="pequeno texto-2">${novo ? "A rotina começa a valer a partir de hoje." : "As mudanças valem para os próximos envios."}</span>
+            <span class="pequeno texto-2">${novo ? "A rotina passa a valer a partir de agora: blocos que ainda estão em andamento hoje já entram." : "As mudanças valem para os próximos envios."}</span>
             <div class="linha"><a class="btn btn-secundario" href="${voltar}">Cancelar</a><button type="button" class="btn btn-primario" data-salvar>${icone("check")} Salvar rotina</button></div>
           </div>
         </form>
@@ -208,6 +209,7 @@ export default async function telaEditor(el, ctx) {
   on(el, "click", "[data-reativar-item]", (ev, b) => {
     const [bi, ii] = b.dataset.reativarItem.split(":").map(Number);
     modelo.blocos[bi].itens[ii].ativo = true;
+    alterado = true;
     desenhar();
   });
   on(el, "click", "[data-mover-item]", (ev, b) => {
@@ -239,6 +241,10 @@ export default async function telaEditor(el, ctx) {
     const bloco = modelo.blocos[Number(b.dataset.reativarBloco)];
     bloco.ativo = true;
     bloco.ate = null;
+    // Volta a ser cobrado a partir de agora (o período em que esteve desativado não conta como atraso).
+    bloco.desde = hoje();
+    bloco.desdeEm = new Date().toISOString();
+    alterado = true;
     desenhar();
   });
   on(el, "click", "[data-mover-bloco]", (ev, b) => {

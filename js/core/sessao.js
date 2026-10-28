@@ -2,6 +2,14 @@
 import { CONFIG } from "../config.js";
 import { MODULOS, MODULO_POR_ID } from "./constantes.js";
 
+function lerPreferencia(chave) {
+  try {
+    return localStorage.getItem(chave);
+  } catch {
+    return null;
+  }
+}
+
 export const sessao = {
   banco: null,
   autenticacao: null,
@@ -10,7 +18,7 @@ export const sessao = {
   unidades: [], // todas as unidades (ativas e inativas)
   setores: [], // setores personalizados
   config: null, // config/sistema
-  unidadeSelecionada: localStorage.getItem("iai-unidade") || "todas",
+  unidadeSelecionada: lerPreferencia("iai-unidade") || "todas",
 };
 
 export function configurado() {
@@ -72,7 +80,11 @@ export function unidadesFiltro() {
 
 export function definirUnidadeSelecionada(id) {
   sessao.unidadeSelecionada = id;
-  localStorage.setItem("iai-unidade", id);
+  try {
+    localStorage.setItem("iai-unidade", id);
+  } catch {
+    /* navegador sem armazenamento local: vale só nesta sessão */
+  }
 }
 
 export function nomeUnidade(id) {

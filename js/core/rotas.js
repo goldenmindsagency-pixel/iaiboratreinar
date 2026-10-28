@@ -31,7 +31,13 @@ export function resolver(caminho) {
     const m = rota.regex.exec(caminho);
     if (m) {
       const params = {};
-      rota.nomes.forEach((n, i) => (params[n] = decodeURIComponent(m[i + 1])));
+      rota.nomes.forEach((n, i) => {
+        try {
+          params[n] = decodeURIComponent(m[i + 1]);
+        } catch {
+          params[n] = m[i + 1];
+        }
+      });
       return { rota, params };
     }
   }

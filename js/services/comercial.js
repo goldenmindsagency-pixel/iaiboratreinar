@@ -16,7 +16,8 @@ export async function listarMetas({ unidades, mes }) {
 export async function salvarMeta(id, d) {
   exigir(pode("comercial", 3), "Você não tem permissão para cadastrar metas.");
   exigir(TIPOS_META[d.tipo], "Escolha o tipo da meta.");
-  const valor = d.tipo === "receita" ? paraCentavos(d.valor) : Math.round(Number(d.valor));
+  // Receita em centavos; demais metas em quantidade inteira ("1.200" = mil e duzentos)
+  const valor = d.tipo === "receita" ? paraCentavos(d.valor) : Math.round(paraCentavos(d.valor) / 100);
   exigir(Number.isFinite(valor) && valor > 0, "Informe um valor de meta maior que zero.");
   const limpo = {
     unidadeId: d.unidadeId,

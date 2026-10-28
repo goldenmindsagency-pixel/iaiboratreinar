@@ -4,7 +4,7 @@ import { icone } from "../core/icones.js";
 import {
   sessao, pode, ehAdmin, todosModulos, minhasUnidades, definirUnidadeSelecionada, verAuditoria, modulosRotina,
 } from "../core/sessao.js";
-import { registrar, resolver, lerHash, iniciarRotas, navegar } from "../core/rotas.js";
+import { registrar, resolver, lerHash, iniciarRotas, navegar, atualizarBusca } from "../core/rotas.js";
 import { carregandoPagina, estadoErro, semPermissao, avisarErro, avatar } from "../core/ui.js";
 import { carregarAlertas, limparCacheAlertas } from "../services/alertas.js";
 
@@ -86,7 +86,7 @@ function seletorUnidadeTopo() {
   const lista = minhasUnidades();
   if (lista.length <= 1) return lista[0] ? html`<span class="chip">${icone("predio")} ${lista[0].nome}</span>` : "";
   return html`<label class="sr-only" for="unidade-global">Unidade</label>
-    <select id="unidade-global" class="entrada" style="min-height:38px;padding:6px 32px 6px 12px;width:auto;background-color:var(--superficie-2)">
+    <select id="unidade-global" class="entrada" autocomplete="off" style="min-height:38px;padding:6px 32px 6px 12px;width:auto;background-color:var(--superficie-2)">
       <option value="todas">Todas as unidades</option>
       ${opcoes(lista.map((u) => ({ valor: u.id, rotulo: u.nome })), sessao.unidadeSelecionada)}
     </select>`;
@@ -105,9 +105,15 @@ function navInferiorHTML() {
 let conteudo;
 let limpezaTelaAtual = null;
 let renderizacao = 0;
+let iniciadoUmaVez = false;
 
-export function iniciarAplicacao(raiz) {
-  registrarRotas();
+export function iniciarAplicacao(raizPagina) {
+  const raiz = document.createElement("div");
+  raizPagina.replaceChildren(raiz);
+  // Rotas, ouvintes globais e o temporizador dos alertas são criados uma única vez por carregamento da página.
+  const primeiraVez = !iniciadoUmaVez;
+  iniciadoUmaVez = true;
+  if (primeiraVez) registrarRotas();
   // Unidade selecionada que não pertence mais ao usuário volta para "todas"
   if (sessao.unidadeSelecionada !== "todas" && !minhasUnidades().some((u) => u.id === sessao.unidadeSelecionada)) definirUnidadeSelecionada("todas");
 
@@ -142,26 +148,38 @@ export function iniciarAplicacao(raiz) {
   on(app, "click", "[data-abrir-menu]", () => app.classList.add("menu-aberto"));
   on(app, "click", "[data-fechar-menu]", () => app.classList.remove("menu-aberto"));
   on(app, "click", ".menu-item", () => app.classList.remove("menu-aberto"));
-  on(app, "click", "[data-sair]", () => sessao.autenticacao.sair().catch(avisarErro));
+  // Ao sair, a página é recarregada: nada da sessão anterior (dados em memória, filtros, caches) fica para o próximo usuário.
+  on(app, "click", "[data-sair]", () =>
+    sessao.autenticacao
+      .sair()
+      .then(() => location.replace(location.pathname))
+      .catch(avisarErro)
+  );
   on(app, "click", "[data-abrir-alertas]", (ev) => {
     ev.stopPropagation();
     alternarAlertas();
   });
-  document.addEventListener("click", (ev) => {
-    const painel = $("#painel-alertas");
-    if (painel && !painel.classList.contains("oculto") && !ev.target.closest("#area-alertas")) painel.classList.add("oculto");
-  });
+  if (primeiraVez) {
+    document.addEventListener("click", (ev) => {
+      const painel = $("#painel-alertas");
+      if (painel && !painel.classList.contains("oculto") && !ev.target.closest("#area-alertas")) painel.classList.add("oculto");
+    });
+  }
   $("#unidade-global", raiz)?.addEventListener("change", (ev) => {
     definirUnidadeSelecionada(ev.target.value);
+    // Uma unidade fixada no endereço (ex.: link de um alerta) daria lugar à escolhida no topo.
+    if (lerHash().busca.unidade) atualizarBusca({ unidade: "" });
     limparCacheAlertas();
     renderizarRota();
     atualizarAlertas();
   });
 
-  iniciarRotas(renderizarRota);
+  if (primeiraVez) {
+    iniciarRotas(renderizarRota);
+    setInterval(() => atualizarAlertas(true), 5 * 60 * 1000);
+  }
+  limparCacheAlertas();
   renderizarRota();
-  atualizarAlertas();
-  setInterval(() => atualizarAlertas(true), 5 * 60 * 1000);
 }
 
 async function atualizarAlertas(forcar = false) {
@@ -172,11 +190,11 @@ async function atualizarAlertas(forcar = false) {
     const relevantes = lista.filter((a) => a.tipo !== "info").length;
     c.textContent = relevantes > 9 ? "9+" : String(relevantes);
     c.classList.toggle("oculto", relevantes === 0);
-    const atrasadas = lista.filter((a) => a.link?.startsWith("#/rotina/")).length;
+    const pendentes = lista.tarefasPendentes ?? lista.filter((a) => a.link?.startsWith("#/rotina/")).length;
     const ct = document.querySelector('[data-contador="tarefas"]');
     if (ct) {
-      ct.textContent = String(atrasadas);
-      ct.classList.toggle("oculto", !atrasadas);
+      ct.textContent = pendentes > 99 ? "99+" : String(pendentes);
+      ct.classList.toggle("oculto", !pendentes);
     }
     const painel = $("#painel-alertas");
     if (painel && !painel.classList.contains("oculto")) desenharAlertas(painel, lista);
@@ -227,6 +245,8 @@ function marcarMenu(caminho) {
 
 export async function renderizarRota() {
   const numero = ++renderizacao;
+  // Mantém o sino e o contador de "Minhas tarefas" em dia a cada troca de tela (usa cache de 2 minutos).
+  atualizarAlertas();
   const { caminho, busca } = lerHash();
   const r = resolver(caminho);
   if (typeof limpezaTelaAtual === "function") {

@@ -206,6 +206,7 @@ export async function alterarAtivo(login, ativo) {
  */
 export async function redefinirSenha(login, novaSenha) {
   exigir(ehAdmin(), "Somente o administrador redefine senhas.");
+  exigir(login !== sessao.perfil?.login, "Para trocar a sua própria senha, use Meu perfil › Trocar senha.");
   exigir(String(novaSenha || "").length >= 8, "A nova senha precisa ter pelo menos 8 caracteres.");
   const antes = await bd().obter(`usuarios/${login}`);
   if (!antes) throw new ErroSistema("nao-encontrado");
