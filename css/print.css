@@ -1,0 +1,102 @@
+/* Impressão / "Salvar como PDF": folha branca A4 com detalhes da marca */
+@page {
+  size: A4;
+  margin: 14mm 12mm;
+}
+
+@media print {
+  :root {
+    --texto: #111;
+    --texto-2: #444;
+    --texto-3: #666;
+    --superficie: #fff;
+    --superficie-2: #f4f4f4;
+    --superficie-3: #e6e6e6;
+    --borda: #d8d8d8;
+    --borda-forte: #c4c4c4;
+    --fundo: #fff;
+  }
+  html,
+  body {
+    background: #fff !important;
+    color: #111 !important;
+    color-scheme: light;
+  }
+  .menu,
+  .topo,
+  .nav-inferior,
+  .faixa-demo,
+  .cabecalho-acoes,
+  .nao-imprimir,
+  .abas,
+  .filtros,
+  .cabecalho-pagina,
+  .toasts,
+  .btn {
+    display: none !important;
+  }
+  .so-impressao {
+    display: block !important;
+  }
+  .app {
+    display: block;
+  }
+  .conteudo {
+    padding: 0 !important;
+    max-width: none;
+  }
+  .painel,
+  .relatorio-folha,
+  .tabela-envoltorio,
+  .indicadores,
+  .indicador {
+    background: #fff !important;
+    border-color: #d8d8d8 !important;
+    box-shadow: none !important;
+  }
+  .relatorio-folha {
+    border: 0 !important;
+    padding: 0 !important;
+  }
+  .relatorio-folha section {
+    break-inside: avoid-page;
+  }
+  .relatorio-folha h2 {
+    break-after: avoid;
+  }
+  .tabela th {
+    background: #f4f4f4 !important;
+    color: #333 !important;
+  }
+  .tabela td {
+    border-bottom-color: #e2e2e2 !important;
+  }
+  .tabela tr {
+    break-inside: avoid;
+  }
+  .grafico text {
+    fill: #555 !important;
+  }
+  .grafico .grade {
+    stroke: #e4e4e4 !important;
+  }
+  .selo {
+    border: 1px solid currentColor;
+    background: transparent !important;
+  }
+  .selo-critico {
+    color: #c3201b !important;
+  }
+  .anel .anel-fundo {
+    stroke: #e6e6e6 !important;
+  }
+  .relatorio-cabecalho {
+    border-bottom-color: #fda905 !important;
+  }
+  .indicador-valor {
+    color: #111 !important;
+  }
+  a {
+    color: #111;
+  }
+}

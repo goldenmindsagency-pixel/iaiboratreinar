@@ -1,0 +1,409 @@
+rules_version = '2';
+
+// =====================================================================
+//  IAÍ GESTÃO — Regras de segurança do Cloud Firestore
+//  Cole este arquivo inteiro em: Firebase Console > Firestore Database
+//  > Regras > Publicar.
+//
+//  Princípios:
+//   - Tudo é negado, a não ser o que está liberado abaixo.
+//   - A permissão vem do perfil do usuário (usuarios/{login}), ligado ao
+//     login pelo documento uids/{uid}. Esconder botões não basta: estas
+//     regras conferem cada leitura e gravação.
+//   - Níveis por módulo: 1 próprio, 2 visualizar, 3 editar, 4 excluir/arquivar.
+//   - Nada operacional é apagado: exclusão = arquivar/cancelar com histórico.
+//   - Alterações em cadastros exigem registro na auditoria no mesmo envio.
+// =====================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------- Identidade e permissões ----------------
+    function logado() {
+      return request.auth != null;
+    }
+    function meuLogin() {
+      return get(/databases/$(database)/documents/uids/$(request.auth.uid)).data.login;
+    }
+    function eu() {
+      return get(/databases/$(database)/documents/usuarios/$(meuLogin())).data;
+    }
+    function ativo() {
+      return logado() && eu().ativo == true;
+    }
+    function admin() {
+      return ativo() && eu().admin == true;
+    }
+    function pode(modulo, nivel) {
+      return ativo() && (eu().admin == true || eu().permissoes.get(modulo, 0) >= nivel);
+    }
+    function naUnidade(unidadeId) {
+      return eu().admin == true || eu().todasUnidades == true || (unidadeId in eu().unidades);
+    }
+    function aprovador() {
+      return ativo() && (eu().admin == true || eu().get('aprovador', false) == true);
+    }
+
+    // ---------------- Utilitários ----------------
+    function novo() {
+      return request.resource.data;
+    }
+    function atual() {
+      return resource.data;
+    }
+    function soMudou(campos) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(campos);
+    }
+    function semMudar(campos) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(campos);
+    }
+    function auditado() {
+      let id = request.resource.data._auditId;
+      return id is string
+        && existsAfter(/databases/$(database)/documents/auditoria/$(id))
+        && !exists(/databases/$(database)/documents/auditoria/$(id));
+    }
+    // Início do dia 'AAAA-MM-DD' no fuso da academia (UTC-3)
+    function inicioDia(d) {
+      let p = d.split('-');
+      return timestamp.date(int(p[0]), int(p[1]), int(p[2])) + duration.value(3, 'h');
+    }
+    // Janela de envio: diária até o fim do dia seguinte; semanal até a segunda seguinte; mensal do dia 25 até ~dia 5.
+    function janelaOk(freq, d) {
+      return d is string && d.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.time >= inicioDia(d)
+        && ((freq == 'diaria' && request.time < inicioDia(d) + duration.value(2, 'd'))
+          || (freq == 'semanal' && request.time < inicioDia(d) + duration.value(8, 'd'))
+          || (freq == 'mensal' && request.time < inicioDia(d) + duration.value(12, 'd')));
+    }
+    // Configuração inicial: só enquanto config/publico não existir
+    function emConfiguracaoInicial() {
+      return logado()
+        && !exists(/databases/$(database)/documents/config/publico)
+        && existsAfter(/databases/$(database)/documents/config/publico);
+    }
+    function adminInicial() {
+      return getAfter(/databases/$(database)/documents/config/publico).data.adminLogin;
+    }
+
+    // ---------------- Configuração ----------------
+    match /config/{doc} {
+      allow get: if doc == 'publico' || ativo();
+      allow list: if ativo();
+      allow create: if (doc == 'publico'
+                        && !exists(/databases/$(database)/documents/config/publico)
+                        && novo().inicializado == true
+                        && getAfter(/databases/$(database)/documents/uids/$(request.auth.uid)).data.login == novo().adminLogin
+                        && getAfter(/databases/$(database)/documents/usuarios/$(novo().adminLogin)).data.admin == true)
+                    || (doc == 'sistema' && admin() && auditado());
+      allow update: if admin() && (doc == 'publico' || auditado());
+      allow delete: if false;
+    }
+
+    // ---------------- Auditoria (somente inclusão) ----------------
+    match /auditoria/{id} {
+      allow read: if admin() || (ativo() && eu().get('verAuditoria', false) == true);
+      allow create: if logado()
+        && novo().autorLogin == getAfter(/databases/$(database)/documents/uids/$(request.auth.uid)).data.login
+        && novo().em == request.time
+        && novo().colecao is string && novo().docId is string
+        && getAfter(/databases/$(database)/documents/$(novo().colecao)/$(novo().docId)).data._auditId == id;
+      allow update, delete: if false;
+    }
+
+    // ---------------- Usuários e acesso ----------------
+    match /usuarios/{login} {
+      allow read: if logado() && (meuLogin() == login || pode('colaboradores', 2));
+      allow create: if (admin() && auditado() && novo().login == login)
+                    || (emConfiguracaoInicial() && adminInicial() == login
+                        && novo().admin == true && novo().uid == request.auth.uid && auditado());
+      allow update: if (admin() && auditado() && novo().login == login)
+                    || (logado() && meuLogin() == login
+                        && soMudou(['primeiroAcesso', 'senhaAlteradaEm'])
+                        && novo().primeiroAcesso == false);
+      allow delete: if false;
+    }
+    match /uids/{uid} {
+      allow get: if logado() && (request.auth.uid == uid || admin());
+      allow list: if admin();
+      allow create: if (admin() && exists(/databases/$(database)/documents/usuarios/$(novo().login)))
+                    || (emConfiguracaoInicial() && uid == request.auth.uid && novo().login == adminInicial());
+      allow update: if false;
+      allow delete: if admin();
+    }
+    // Usado na tela de login para descobrir o e-mail interno do usuário (somente leitura direta, sem listagem)
+    match /logins/{login} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if admin() || (emConfiguracaoInicial() && login == adminInicial());
+      allow delete: if false;
+    }
+    // Diretório básico (nome, função, unidades) para escolher responsáveis
+    match /diretorio/{login} {
+      allow read: if ativo();
+      allow create, update: if admin() || (emConfiguracaoInicial() && login == adminInicial());
+      allow delete: if false;
+    }
+
+    // ---------------- Unidades e setores ----------------
+    match /unidades/{id} {
+      allow read: if ativo();
+      allow create: if pode('unidades', 3) && auditado();
+      allow update: if pode('unidades', 3) && auditado()
+                    && (novo().ativo == atual().ativo || pode('unidades', 4));
+      allow delete: if false;
+    }
+    match /setores/{id} {
+      allow read: if ativo();
+      allow create, update: if admin() && auditado();
+      allow delete: if false;
+    }
+    match /escalas/{id} {
+      allow read: if ativo();
+      allow create, update: if pode('gestao', 3) && naUnidade(novo().unidadeId) && auditado();
+      allow delete: if false;
+    }
+
+    // ---------------- Rotinas (modelos de checklist) ----------------
+    match /rotinaModelos/{id} {
+      allow read: if ativo() && naUnidade(atual().unidadeId) && pode(atual().setorId, 1);
+      allow create: if pode(novo().setorId, 3) && naUnidade(novo().unidadeId) && auditado();
+      allow update: if pode(atual().setorId, 3) && naUnidade(atual().unidadeId)
+                    && novo().setorId == atual().setorId && novo().unidadeId == atual().unidadeId
+                    && (novo().ativo == atual().ativo || pode(atual().setorId, 4))
+                    && auditado();
+      allow delete: if false;
+    }
+
+    // ---------------- Execuções (blocos enviados) ----------------
+    match /execucoes/{id} {
+      allow get: if ativo() && (resource == null
+                    || (naUnidade(atual().unidadeId) && pode(atual().setorId, 1)));
+      allow list: if ativo() && (
+                    (pode(atual().setorId, 2) && naUnidade(atual().unidadeId))
+                    || (pode(atual().setorId, 1) && atual().autorLogin == meuLogin()));
+      allow create: if ativo()
+        && pode(novo().setorId, 1)
+        && naUnidade(novo().unidadeId)
+        && novo().autorLogin == meuLogin()
+        && novo().enviadoEm == request.time
+        && novo().status == 'enviado'
+        && get(/databases/$(database)/documents/rotinaModelos/$(novo().modeloId)).data.unidadeId == novo().unidadeId
+        && get(/databases/$(database)/documents/rotinaModelos/$(novo().modeloId)).data.setorId == novo().setorId
+        && janelaOk(novo().frequencia, novo().dataRef)
+        && novo().respostas is list && novo().respostas.size() <= 200;
+      allow update: if ativo() && (
+          // revisão do coordenador/gestor
+          (pode(atual().setorId, 3) && naUnidade(atual().unidadeId)
+            && atual().autorLogin != meuLogin()
+            && soMudou(['status', 'revisao', '_auditId'])
+            && novo().status in ['revisado', 'correcao']
+            && auditado())
+          ||
+          // reenvio do próprio autor após pedido de correção
+          (atual().autorLogin == meuLogin() && atual().status == 'correcao'
+            && novo().status == 'enviado'
+            && novo().reenviadoEm == request.time
+            && soMudou(['status', 'respostas', 'extras', 'totais', 'registrosResumo', 'correcoes', 'reenviadoEm']))
+        );
+      allow delete: if false;
+    }
+
+    // ---------------- Registros avulsos (atendimentos, contatos, feedbacks) ----------------
+    match /registros/{id} {
+      allow read: if ativo() && (
+                    (pode(atual().setorId, 2) && naUnidade(atual().unidadeId))
+                    || (pode(atual().setorId, 1) && atual().autorLogin == meuLogin()));
+      allow create: if ativo()
+        && pode(novo().setorId, 1)
+        && naUnidade(novo().unidadeId)
+        && novo().autorLogin == meuLogin()
+        && novo().criadoEm == request.time
+        && novo().cancelado == false
+        && janelaOk('diaria', novo().dataRef)
+        && !exists(/databases/$(database)/documents/execucoes/$(novo().execucaoId));
+      allow update: if ativo() && atual().autorLogin == meuLogin()
+        && !exists(/databases/$(database)/documents/execucoes/$(atual().execucaoId))
+        && soMudou(['dados', 'cancelado', 'atualizadoEm'])
+        && novo().atualizadoEm == request.time;
+      allow delete: if false;
+    }
+
+    // ---------------- Ocorrências e pendências ----------------
+    function lerPend(p) {
+      return ativo() && (
+        (pode('pendencias', 2) && naUnidade(p.unidadeId))
+        || (pode(p.setorId, 2) && naUnidade(p.unidadeId))
+        || p.autorLogin == meuLogin()
+        || p.responsavelLogin == meuLogin());
+    }
+    function gerePend(p) {
+      return (pode('pendencias', 3) || pode(p.setorId, 3)) && naUnidade(p.unidadeId);
+    }
+    function cancelaPend(p) {
+      return (pode('pendencias', 4) || pode(p.setorId, 4)) && naUnidade(p.unidadeId);
+    }
+    function transicaoOk(de, para) {
+      return de == para
+        || (de == 'aberta' && para in ['em_analise', 'em_andamento', 'cancelada'])
+        || (de == 'em_analise' && para in ['em_andamento', 'aguardando', 'cancelada'])
+        || (de == 'em_andamento' && para in ['aguardando', 'resolvida', 'cancelada'])
+        || (de == 'aguardando' && para in ['em_andamento', 'resolvida', 'cancelada'])
+        || (de == 'resolvida' && para == 'em_andamento');
+    }
+    function eventoNovo(pid) {
+      let ev = request.resource.data._evento;
+      return ev is string
+        && existsAfter(/databases/$(database)/documents/pendencias/$(pid)/historico/$(ev))
+        && !exists(/databases/$(database)/documents/pendencias/$(pid)/historico/$(ev));
+    }
+
+    match /pendencias/{id} {
+      allow read: if lerPend(atual());
+      allow create: if pode('pendencias', 1)
+        && naUnidade(novo().unidadeId)
+        && novo().autorLogin == meuLogin()
+        && novo().criadoEm == request.time
+        && novo().status == 'aberta' && novo().aberta == true
+        && novo().prioridade in ['baixa', 'media', 'alta', 'critica']
+        && novo().titulo is string && novo().titulo.size() <= 200
+        && eventoNovo(id);
+      allow update: if ativo() && eventoNovo(id)
+        && semMudar(['unidadeId', 'autorLogin', 'autorNome', 'codigo', 'criadoEm', 'origem'])
+        && transicaoOk(atual().status, novo().status)
+        && novo().aberta == !(novo().status in ['resolvida', 'cancelada'])
+        && (novo().status != 'cancelada' || atual().status == 'cancelada' || cancelaPend(atual()))
+        && (
+          gerePend(atual())
+          || (atual().responsavelLogin == meuLogin() && atual().status != 'resolvida'
+              && novo().status in ['em_andamento', 'aguardando', 'resolvida', atual().status]
+              && soMudou(['status', 'aberta', 'solucao', 'concluidoEm', 'dataConclusao', 'mesConclusao', 'noPrazo', 'atualizadoEm', '_evento']))
+          || (lerPend(atual()) && soMudou(['atualizadoEm', '_evento']))
+        );
+      allow delete: if false;
+
+      match /historico/{ev} {
+        allow read: if lerPend(get(/databases/$(database)/documents/pendencias/$(id)).data);
+        allow create: if ativo()
+          && novo().autorLogin == meuLogin()
+          && novo().em == request.time
+          && getAfter(/databases/$(database)/documents/pendencias/$(id)).data._evento == ev;
+        allow update, delete: if false;
+      }
+    }
+
+    // Sequência dos códigos OC-AAAA-0000
+    match /contadores/{id} {
+      allow read: if ativo();
+      allow create: if pode('pendencias', 1) && novo().valor == 1;
+      allow update: if pode('pendencias', 1) && soMudou(['valor']) && novo().valor == atual().valor + 1;
+      allow delete: if false;
+    }
+
+    // ---------------- Equipamentos e estrutura ----------------
+    match /equipamentos/{id} {
+      allow read: if ativo() && naUnidade(atual().unidadeId);
+      allow create: if pode('equipamentos', 3) && naUnidade(novo().unidadeId) && auditado();
+      allow update: if pode('equipamentos', 3) && naUnidade(atual().unidadeId)
+                    && novo().unidadeId == atual().unidadeId
+                    && (novo().ativo == atual().ativo || pode('equipamentos', 4))
+                    && auditado();
+      allow delete: if false;
+    }
+    match /ambientes/{id} {
+      allow read: if ativo() && naUnidade(atual().unidadeId);
+      allow create: if pode('estrutura', 3) && naUnidade(novo().unidadeId) && auditado();
+      allow update: if pode('estrutura', 3) && naUnidade(atual().unidadeId)
+                    && novo().unidadeId == atual().unidadeId
+                    && (novo().ativo == atual().ativo || pode('estrutura', 4))
+                    && auditado();
+      allow delete: if false;
+    }
+    match /manutencoes/{id} {
+      allow read: if ativo() && naUnidade(atual().unidadeId)
+                  && (pode(atual().setorId, 2) || (pode(atual().setorId, 1) && atual().autorLogin == meuLogin()));
+      allow create: if pode(novo().setorId, 3) && naUnidade(novo().unidadeId)
+                    && novo().setorId in ['equipamentos', 'estrutura']
+                    && novo().autorLogin == meuLogin() && novo().criadoEm == request.time;
+      allow update: if pode(atual().setorId, 3) && naUnidade(atual().unidadeId) && auditado();
+      allow delete: if false;
+    }
+    match /custos/{id} {
+      allow read: if ativo() && naUnidade(atual().unidadeId)
+                  && (pode(atual().setorId, 2) || pode('relatorios', 2) || pode('gestao', 2));
+      allow create: if (pode(novo().setorId, 3) || pode('pendencias', 3) || pode('gestao', 3))
+                    && naUnidade(novo().unidadeId)
+                    && novo().autorLogin == meuLogin() && novo().criadoEm == request.time
+                    && novo().valor is int && novo().valor > 0
+                    && novo().cancelado == false;
+      allow update: if (pode(atual().setorId, 4) || pode('gestao', 4)) && naUnidade(atual().unidadeId)
+                    && soMudou(['cancelado', 'justificativaCancelamento', 'atualizadoEm', 'atualizadoPor', 'atualizadoPorNome', '_auditId'])
+                    && auditado();
+      allow delete: if false;
+    }
+
+    // ---------------- Comercial ----------------
+    match /metas/{id} {
+      allow read: if pode('comercial', 1) && naUnidade(atual().unidadeId);
+      allow create, update: if pode('comercial', 3) && naUnidade(novo().unidadeId) && auditado();
+      allow delete: if false;
+    }
+    match /evoDados/{id} {
+      allow read: if pode('comercial', 2) && naUnidade(atual().unidadeId);
+      allow create: if pode('comercial', 3) && naUnidade(novo().unidadeId) && novo().importacaoId is string;
+      allow update: if pode('comercial', 4) && naUnidade(atual().unidadeId) && auditado();
+      allow delete: if false;
+    }
+    match /importacoesEvo/{id} {
+      allow read: if pode('comercial', 2) && naUnidade(atual().unidadeId);
+      allow create: if pode('comercial', 3) && naUnidade(novo().unidadeId)
+                    && novo().autorLogin == meuLogin() && novo().em == request.time;
+      allow update, delete: if false;
+    }
+
+    // ---------------- Marketing ----------------
+    match /marketingAcoes/{id} {
+      allow read: if ativo() && naUnidade(atual().unidadeId)
+                  && (pode('marketing', 2) || (pode('marketing', 1) && atual().responsavelLogin == meuLogin()));
+      allow create: if pode('marketing', 3) && naUnidade(novo().unidadeId) && auditado();
+      allow update: if naUnidade(atual().unidadeId) && auditado() && (
+          (pode('marketing', 3) && (novo().ativo == atual().ativo || pode('marketing', 4)))
+          || (pode('marketing', 1) && atual().responsavelLogin == meuLogin()
+              && soMudou(['etapa', 'resultados', 'publicadoEm', 'atualizadoEm', 'atualizadoPor', 'atualizadoPorNome', '_auditId']))
+        );
+      allow delete: if false;
+    }
+
+    // ---------------- Gestão: investimentos e relatório mensal ----------------
+    match /investimentos/{id} {
+      allow read: if ativo() && naUnidade(atual().unidadeId)
+                  && (pode('gestao', 2) || pode('relatorios', 2) || aprovador());
+      allow create: if pode('gestao', 3) && naUnidade(novo().unidadeId)
+                    && novo().status in ['identificado', 'orcado'] && auditado();
+      allow update: if naUnidade(atual().unidadeId) && auditado() && (
+          (pode('gestao', 3)
+            && (novo().status == atual().status || !(novo().status == 'aprovado' || atual().status == 'aprovado' && novo().status != 'realizado') || aprovador()))
+          || (aprovador() && novo().status in ['aprovado', 'descartado']
+              && soMudou(['status', 'aprovacao', 'atualizadoEm', 'atualizadoPor', 'atualizadoPorNome', '_auditId']))
+        );
+      allow delete: if false;
+    }
+    match /relatoriosMensais/{id} {
+      allow read: if ativo() && naUnidade(atual().unidadeId)
+                  && (pode('gestao', 2) || pode('relatorios', 2) || aprovador());
+      allow create: if pode('gestao', 3) && naUnidade(novo().unidadeId)
+                    && novo().status in ['rascunho', 'enviado'] && auditado();
+      allow update: if naUnidade(atual().unidadeId) && auditado() && (
+          (pode('gestao', 3) && atual().status in ['rascunho', 'devolvido']
+            && novo().status in ['rascunho', 'enviado'])
+          || (aprovador() && atual().status == 'enviado' && novo().status in ['aprovado', 'devolvido']
+            && soMudou(['status', 'aprovacao', 'atualizadoEm', 'atualizadoPor', 'atualizadoPorNome', '_auditId']))
+        );
+      allow delete: if false;
+    }
+
+    // Qualquer outro caminho: negado.
+    match /{caminho=**} {
+      allow read, write: if false;
+    }
+  }
+}
